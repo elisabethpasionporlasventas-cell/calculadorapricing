@@ -1,13 +1,128 @@
 <!doctype html>
 <html lang="es">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Plano de Escandallo — Arquitectura Comercial</title>
-    <meta name="description" content="Calcula el coste real, el margen y lo que te queda limpio en cada venta." />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Radiografía de Negocio · MVP funcional</title>
+<style>
+:root{--bg:#f4efe6;--card:#fffdf8;--ink:#1d241f;--muted:#667066;--olive:#59694d;--line:#d9d1c3;--soft:#e9e3d7}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{position:sticky;top:0;background:rgba(244,239,230,.96);border-bottom:1px solid var(--line);padding:14px 5%;z-index:3}
+.brand{font-family:Georgia,serif;font-size:22px}.brand small{display:block;font:11px system-ui;letter-spacing:.15em;color:var(--olive);text-transform:uppercase}
+main{max-width:920px;margin:auto;padding:28px 18px 80px}h1,h2{font-family:Georgia,serif;font-weight:500}h1{font-size:clamp(36px,7vw,62px);line-height:1.02}h2{font-size:30px;margin-top:0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 8px 25px rgba(30,30,20,.04)}
+label{font-weight:700;display:block;margin:16px 0 7px}input,textarea,select{width:100%;border:1px solid #bdb6aa;background:#fff;color:#20251f;border-radius:12px;padding:13px;font:inherit}
+textarea{min-height:115px;resize:vertical}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+button,.btn{border:0;border-radius:999px;background:var(--olive);color:white;padding:12px 17px;font-weight:700;cursor:pointer}.ghost{background:#fff;color:var(--olive);border:1px solid var(--olive)}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.note{color:var(--muted);font-size:14px}.ok{color:#36552f;font-weight:700}.warn{color:#8a5c19}
+.progress{height:8px;background:var(--soft);border-radius:10px;overflow:hidden}.progress i{display:block;height:100%;background:var(--olive);width:0}
+.filelist,.audiolist{font-size:14px;margin-top:8px}.pill{display:inline-block;background:var(--soft);padding:5px 9px;border-radius:999px;margin:3px}
+nav{display:flex;gap:6px;overflow:auto;padding:8px 0 18px}nav button{white-space:nowrap;background:#e7e0d3;color:#4b5548}nav button.active{background:var(--olive);color:#fff}
+section.step{display:none}section.step.active{display:block}
+.metric{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.metric div{background:var(--soft);padding:14px;border-radius:14px}
+@media(max-width:650px){.row,.metric{grid-template-columns:1fr}.card{padding:17px}main{padding-top:16px}}
+</style>
+</head>
+<body>
+<header><div class="brand">Elisabeth Tchana<small>Consultoría de negocio · Radiografía beta</small></div></header>
+<main>
+<div class="card">
+<strong>MVP funcional · v0.3.1</strong>
+<p class="note">Tus respuestas, archivos y audios se guardan en <b>este navegador y este dispositivo</b>. Puedes cerrar y volver. En esta beta todavía no se envían a Elisabeth ni se procesan con IA.</p>
+<div class="progress"><i id="bar"></i></div><div id="status" class="note"></div>
+</div>
+<nav id="nav"></nav>
+
+<section class="step" data-title="1 · Empresa">
+<h1>Empecemos por entender tu negocio.</h1>
+<div class="card">
+<div class="row"><div><label>Empresa</label><input data-save id="empresa"></div><div><label>Tu nombre</label><input data-save id="nombre"></div></div>
+<div class="row"><div><label>Web</label><input data-save id="web" placeholder="https://"></div><div><label>Personas en el equipo</label><input data-save id="equipo" type="number" min="1"></div></div>
+<label>¿Qué hacéis y cómo gana dinero el negocio?</label><textarea data-save id="modelo"></textarea>
+<label>¿Qué crees que os está frenando ahora?</label><textarea data-save id="freno"></textarea>
+<label>Si dentro de 12 meses esto hubiera ido muy bien, ¿qué habría cambiado?</label><textarea data-save id="objetivo"></textarea>
+</div></section>
+
+<section class="step" data-title="2 · Evidencias">
+<h2>Comparte lo que ya existe.</h2><p>No prepares informes nuevos. Sube aquello que ya utilizáis.</p>
+<div class="card"><label>Excel, CSV, PDF, Word, imágenes…</label>
+<input id="files" type="file" multiple accept=".xlsx,.xls,.csv,.pdf,.doc,.docx,.txt,.png,.jpg,.jpeg">
+<div class="filelist" id="filelist"></div><p class="note">En esta beta los archivos se almacenan localmente mediante IndexedDB. Para la versión online pasarán al expediente seguro del cliente.</p></div>
+</section>
+
+<section class="step" data-title="3 · Conversación">
+<h2>Cuéntamelo como lo harías tomando un café.</h2>
+<div class="card">
+<label>Piensa en tus últimos clientes. ¿Cómo llegaron hasta ti?</label><textarea data-save id="captacion"></textarea>
+<label>¿Qué pasa desde que alguien dice “me interesa” hasta que compra o se pierde?</label><textarea data-save id="conversion"></textarea>
+<label>Después de vender, ¿qué hacéis para que vuelva, renueve o compre algo más?</label><textarea data-save id="postventa"></textarea>
+<label>¿Qué cosas importantes se paran si tú no estás?</label><textarea data-save id="dependencia"></textarea>
+</div>
+<div class="card"><h3>Prefiero contarlo hablando</h3><p class="note">Pulsa grabar, habla y detén cuando termines. El audio queda guardado en este dispositivo.</p>
+<div class="actions"><button id="record">● Grabar respuesta</button><button class="ghost" id="stop" disabled>■ Detener</button></div><div class="audiolist" id="audiolist"></div></div>
+</section>
+
+<section class="step" data-title="4 · Semana Real">
+<h2>Semana Real</h2><p>Registra actividades sin clasificarlas. Queremos realidad, no un parte perfecto.</p>
+<div class="card">
+<label>¿Qué acabas de hacer?</label><textarea id="actividad"></textarea>
+<div class="row"><div><label>Minutos</label><input id="minutos" type="number"></div><div><label>Herramienta</label><input id="herramienta" placeholder="WhatsApp, CRM, Excel…"></div></div>
+<div class="actions"><button id="addActivity">Guardar actividad</button></div><div id="activities"></div>
+</div></section>
+
+<section class="step" data-title="5 · Cierre">
+<h2>Antes de terminar…</h2>
+<div class="card">
+<label>¿Qué problema importante sabes que existe pero sigues posponiendo?</label><textarea data-save id="riesgo"></textarea>
+<label>¿Qué tipo de cliente, producto o trabajo factura pero os consume demasiado?</label><textarea data-save id="costeComplejidad"></textarea>
+<label>¿Qué números miras para saber si el negocio va bien?</label><textarea data-save id="kpis"></textarea>
+<label>¿Hay algo importante que no te hayamos preguntado?</label><textarea data-save id="faltante"></textarea>
+</div></section>
+
+<section class="step" data-title="6 · Expediente">
+<h2>Tu expediente de prueba</h2>
+<div class="card"><div class="metric"><div><b id="mAnswers">0</b><br><span class="note">respuestas</span></div><div><b id="mFiles">0</b><br><span class="note">archivos</span></div><div><b id="mActs">0</b><br><span class="note">actividades</span></div></div>
+<p id="summary"></p>
+<div class="actions"><button id="export">Exportar respuestas (.json)</button><button class="ghost" id="clear">Borrar prueba</button></div>
+<p class="note">El JSON permite que, durante esta fase beta, nos pases el expediente estructurado para probar el motor diagnóstico sin copiar y pegar todas las respuestas.</p></div>
+</section>
+</main>
+<script>
+const fields=[...document.querySelectorAll('[data-save]')], KEY='et_radiografia_v03';
+let state=JSON.parse(localStorage.getItem(KEY)||'{"answers":{},"activities":[]}');
+function persist(){localStorage.setItem(KEY,JSON.stringify(state));update()}
+fields.forEach(el=>{el.value=state.answers[el.id]||'';el.addEventListener('input',()=>{state.answers[el.id]=el.value;persist()})});
+const steps=[...document.querySelectorAll('.step')],nav=document.getElementById('nav');let current=0;
+steps.forEach((s,i)=>{let b=document.createElement('button');b.textContent=s.dataset.title;b.onclick=()=>show(i);nav.appendChild(b)});
+function show(i){current=i;steps.forEach((s,j)=>s.classList.toggle('active',j===i));[...nav.children].forEach((b,j)=>b.classList.toggle('active',j===i));update();scrollTo({top:0,behavior:'smooth'})}
+function update(){let answered=Object.values(state.answers).filter(v=>String(v).trim()).length;let pct=Math.round(answered/fields.length*100);document.getElementById('bar').style.width=pct+'%';document.getElementById('status').textContent=`${pct}% de respuestas base completadas · guardado automático`;document.getElementById('mAnswers').textContent=answered;document.getElementById('mActs').textContent=state.activities.length;document.getElementById('summary').textContent=answered?'Tu información está guardada en este dispositivo. Puedes cerrar esta página y continuar después.':'Empieza por completar la información de empresa.';renderActs()}
+function renderActs(){document.getElementById('activities').innerHTML=state.activities.map((a,i)=>`<p><span class="pill">${a.min||'?'} min</span><b>${escapeHtml(a.text)}</b> · ${escapeHtml(a.tool||'sin herramienta')}</p>`).join('')}
+function escapeHtml(s=''){return s.replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+const actividadEl=document.getElementById('actividad');
+const minutosEl=document.getElementById('minutos');
+const herramientaEl=document.getElementById('herramienta');
+document.getElementById('addActivity').onclick=()=>{let text=actividadEl.value.trim();if(!text)return alert('Cuéntame qué acabas de hacer.');state.activities.push({text,min:minutosEl.value,tool:herramientaEl.value,at:new Date().toISOString()});actividadEl.value='';minutosEl.value='';herramientaEl.value='';persist()};
+
+// IndexedDB files/audio
+let db; const req=indexedDB.open('et_radiografia_files',1);req.onupgradeneeded=e=>{if(!e.target.result.objectStoreNames.contains('items'))e.target.result.createObjectStore('items',{keyPath:'id'})};req.onsuccess=e=>{db=e.target.result;renderStored()};
+function putItem(obj){let tx=db.transaction('items','readwrite');tx.objectStore('items').put(obj);tx.oncomplete=renderStored}
+const fileInput=document.getElementById('files');
+const fileListEl=document.getElementById('filelist');
+const audioListEl=document.getElementById('audiolist');
+const mFilesEl=document.getElementById('mFiles');
+function renderStored(){if(!db)return;let r=db.transaction('items').objectStore('items').getAll();r.onsuccess=()=>{let items=r.result,fs=items.filter(x=>x.kind==='file'),as=items.filter(x=>x.kind==='audio');fileListEl.innerHTML=fs.map(x=>`<span class="pill">📎 ${escapeHtml(x.name)}</span>`).join('')||'<span class="note">Todavía no has adjuntado archivos.</span>';audioListEl.innerHTML=as.map(x=>`<p><audio controls src="${URL.createObjectURL(x.blob)}"></audio> <span class="note">${new Date(x.created).toLocaleString()}</span></p>`).join('');mFilesEl.textContent=fs.length}};
+fileInput.onchange=()=>[...fileInput.files].forEach(f=>putItem({id:crypto.randomUUID(),kind:'file',name:f.name,type:f.type,blob:f,created:Date.now()}));
+
+// Recorder
+let rec,chunks=[];
+const recordBtn=document.getElementById('record');
+const stopBtn=document.getElementById('stop');
+recordBtn.onclick=async()=>{try{let stream=await navigator.mediaDevices.getUserMedia({audio:true});rec=new MediaRecorder(stream);chunks=[];rec.ondataavailable=e=>chunks.push(e.data);rec.onstop=()=>{let blob=new Blob(chunks,{type:rec.mimeType});putItem({id:crypto.randomUUID(),kind:'audio',name:'respuesta-audio',type:rec.mimeType,blob,created:Date.now()});stream.getTracks().forEach(t=>t.stop())};rec.start();recordBtn.disabled=true;stopBtn.disabled=false;recordBtn.textContent='Grabando…'}catch(e){alert('El navegador no ha permitido usar el micrófono. Revisa los permisos del navegador.')}}
+stopBtn.onclick=()=>{if(rec&&rec.state!=='inactive')rec.stop();recordBtn.disabled=false;stopBtn.disabled=true;recordBtn.textContent='● Grabar respuesta'};
+
+const exportBtn=document.getElementById('export');
+const clearBtn=document.getElementById('clear');
+exportBtn.onclick=()=>{let blob=new Blob([JSON.stringify({...state,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});let a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=(state.answers.empresa||'empresa')+'-radiografia-beta.json';a.click()};
+clearBtn.onclick=()=>{if(confirm('¿Borrar todas las respuestas y actividades de esta prueba?')){localStorage.removeItem(KEY);if(db){let tx=db.transaction('items','readwrite');tx.objectStore('items').clear();tx.oncomplete=()=>location.reload()}else location.reload()}};
+show(0);
+</script>
+</body></html>
