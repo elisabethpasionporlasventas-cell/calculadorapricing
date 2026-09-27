@@ -45,13 +45,13 @@ let uidCounter = 1;
 const uid = () => `it-${Date.now()}-${uidCounter++}`;
 
 const C = {
-  bg: "#F5F0E6",
-  panel: "#FFFDF8",
-  border: "#DCD1BC",
-  text: "#2B2620",
-  muted: "#8C8270",
-  tierra: "#AE5B2B",
-  tierraSoft: "rgba(174,91,43,0.10)",
+  bg: "#f8efe4",
+  panel: "#fffdf9",
+  border: "#dacdc1",
+  text: "#33231c",
+  muted: "#665950",
+  tierra: "#a85730",
+  tierraSoft: "rgba(168,87,48,0.10)",
   oliva: "#6C7A45",
   olivaSoft: "rgba(108,122,69,0.10)",
   alerta: "#9C3B2B",
@@ -85,15 +85,16 @@ function DimLine({ label, value, accent = C.oliva }) {
 }
 
 function SectorSelect({ value, onChange, options }) {
-  const isOtro = value && !options.includes(value) ? true : value === OTRO;
+  const isOtro = Boolean(value) && !options.includes(value) || value === OTRO;
   return (
     <div className="space-y-1.5">
       <select
-        value={options.includes(value) ? value : OTRO}
-        onChange={(e) => onChange(e.target.value === OTRO ? "" : e.target.value)}
+        value={value === "" ? "" : options.includes(value) ? value : OTRO}
+        onChange={(e) => onChange(e.target.value)}
         className="w-full border px-3 py-2 text-sm outline-none"
         style={{ background: C.bg, borderColor: C.border, color: C.text }}
       >
+        <option value="" disabled>Elige un sector</option>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
       {isOtro && (
@@ -278,19 +279,26 @@ function CanalList({ canales, setCanales, pvpSinIva, beneficioBruto, marketingIm
 }
 
 export default function App() {
+  const [wizardStep, setWizardStep] = useState(0);
+  const [formError, setFormError] = useState("");
+  const [leadName, setLeadName] = useState("");
+  const [leadEmail, setLeadEmail] = useState("");
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [marketingAccepted, setMarketingAccepted] = useState(false);
+  const [companyWebsite, setCompanyWebsite] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [leadPending, setLeadPending] = useState(false);
+  const [leadError, setLeadError] = useState("");
   const [modo, setModo] = useState("producto"); // producto | servicio
 
-  const [nombre, setNombre] = useState("Mi producto");
-  const [sector, setSector] = useState(SECTORES_PRODUCTO[0]);
-  const [sectorServicio, setSectorServicio] = useState(SECTORES_SERVICIO[0]);
+  const [nombre, setNombre] = useState("");
+  const [sector, setSector] = useState("");
+  const [sectorServicio, setSectorServicio] = useState("");
 
   // ---- Producto ----
-  const [materiales, setMateriales] = useState([{ id: uid(), nombre: "Materia prima", cantidad: 1, unidad: "kg", precio: 3.5, merma: 5 }]);
-  const [packaging, setPackaging] = useState([
-    { id: uid(), nombre: "Caja", cantidad: 1, unidad: "ud", precio: 0.5, merma: 0 },
-    { id: uid(), nombre: "Etiqueta", cantidad: 1, unidad: "ud", precio: 0.15, merma: 0 },
-  ]);
-  const [manoObra, setManoObra] = useState([{ id: uid(), nombre: "Elaboración", cantidad: 0.25, unidad: "h", precio: 12, merma: 0 }]);
+  const [materiales, setMateriales] = useState([{ id: uid(), nombre: "", cantidad: 1, unidad: "ud", precio: 0, merma: 0 }]);
+  const [packaging, setPackaging] = useState([]);
+  const [manoObra, setManoObra] = useState([{ id: uid(), nombre: "", cantidad: 0, unidad: "h", precio: 0, merma: 0 }]);
   const [otros, setOtros] = useState([]);
   const [indirectos, setIndirectos] = useState([]);
   const [unidadesMes, setUnidadesMes] = useState(100);
@@ -309,6 +317,8 @@ export default function App() {
   // ---- Compartido ----
   const [modoMargen, setModoMargen] = useState("coste");
   const [margen, setMargen] = useState(45);
+  const margenSobreVenta = modoMargen === "coste" ? (100 * margen / (100 + Number(margen || 0))) : Number(margen || 0);
+  const margenSobreCoste = modoMargen === "pvp" && margen < 100 ? (100 * margen / (100 - Number(margen || 0))) : Number(margen || 0);
   const [iva, setIva] = useState(21);
   const [irpf, setIrpf] = useState(20);
   const [irpfOpen, setIrpfOpen] = useState(false);
@@ -373,12 +383,42 @@ export default function App() {
   const provisionIrpfActual = Math.max(margenActualTrasComerciales, 0) * (irpfEfectivo / 100);
   const estimacionActual = margenActualTrasComerciales - provisionIrpfActual;
   const diffEstimacion = estimacionFinal - estimacionActual;
+  const channelRate = canalPrincipal.tipo === "porcentaje" ? (canalPrincipal.valor || 0) / 100 : 0;
+  const flatCommission = canalPrincipal.tipo !== "porcentaje" ? (canalPrincipal.valor || 0) : 0;
+  const priceFloorExVat = 1 - marketingPct / 100 - channelRate > 0
+    ? (costeTotal + flatCommission) / (1 - marketingPct / 100 - channelRate) : null;
+  const priceFloor = priceFloorExVat === null ? null : priceFloorExVat * (1 + iva / 100);
+
+  async function unlockResult(event) {
+    event.preventDefault();
+    if (!privacyAccepted || costeTotal <= 0 || !nombre.trim() || !(modo === "producto" ? sector : sectorServicio).trim() || (modo === "producto" ? sector : sectorServicio) === OTRO) {
+      setLeadError("Completa el coste, el nombre y el sector, y acepta la información de privacidad.");
+      return;
+    }
+    setLeadPending(true);
+    setLeadError("");
+    try {
+      const res = await fetch("/api/pricing-leads", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: leadName.trim(), email: leadEmail.trim(), kind: modo,
+          item: nombre.trim(), sector: (modo === "producto" ? sector : sectorServicio).trim(),
+          privacyAccepted, marketingAccepted, website: companyWebsite,
+          summary: { cost: costeTotal, currentPrice: precioActualNum || null, margin: margenReal,
+            minimumPrice: priceFloor, targetPrice: pvpFinal } }),
+      });
+      if (!res.ok) throw new Error("No se ha podido guardar tu solicitud. Vuelve a intentarlo.");
+      setUnlocked(true);
+      setWizardStep(7);
+      window.setTimeout(() => document.getElementById("calculadora")?.scrollIntoView({ behavior: "smooth" }), 40);
+    } catch (error) { setLeadError(error.message); }
+    finally { setLeadPending(false); }
+  }
 
   const warnings = [];
   if (modo === "producto") {
     if (costeManoObra === 0) warnings.push("No has añadido coste de mano de obra: tu tiempo también cuesta.");
     if (indirectos.length === 0) warnings.push("No has añadido costes indirectos (alquiler, luz, seguros…) — si tienes, el coste real es mayor.");
-    if (materiales.length === 0) warnings.push("No has añadido ningún material.");
+    if (costeMateriales === 0) warnings.push("No has añadido el coste de los materiales.");
   } else {
     if (horasTotalesServicio === 0) warnings.push("No has puesto ninguna hora para este servicio.");
     if (indirectosServicio.length === 0) warnings.push("No has añadido herramientas/gastos generales — si tienes, el coste real es mayor.");
@@ -485,367 +525,115 @@ Responde ÚNICAMENTE con JSON válido: {"marginMin": numero, "marginMax": numero
         { label: "Otros costes directos", value: costeOtrosServicio },
       ];
 
-  const toggleBtn = (active) => ({
-    borderColor: active ? C.tierra : C.border,
-    color: active ? "#fff" : C.text,
-    background: active ? C.tierra : C.panel,
-  });
+  const totalSteps = modo === "producto" ? 6 : 5;
+  const activeNumber = wizardStep === 0 ? 0 : wizardStep <= 2 ? wizardStep : modo === "producto" ? Math.min(wizardStep, 6) : Math.min(wizardStep - 1, 5);
+  const progress = wizardStep === 0 ? 0 : wizardStep >= 6 ? 100 : Math.round((activeNumber / totalSteps) * 100);
+  function nextStep() {
+    if (wizardStep === 1 && (!nombre.trim() || !(modo === "producto" ? sector : sectorServicio).trim() || (modo === "producto" ? sector : sectorServicio) === OTRO)) {
+      setFormError("Escribe el nombre y el sector antes de seguir."); return;
+    }
+    if (wizardStep === 4 && costeTotal <= 0) {
+      setFormError("Añade al menos un coste para que el cálculo tenga sentido."); return;
+    }
+    setFormError("");
+    setWizardStep(wizardStep === 2 && modo === "servicio" ? 4 : wizardStep + 1);
+  }
+  function previousStep() {
+    setFormError("");
+    setWizardStep(wizardStep === 4 && modo === "servicio" ? 2 : wizardStep - 1);
+  }
+  const revenueMargin = tieneComparador && precioActualSinIva > 0 ? ((precioActualSinIva - costeTotal - marketingActual - comisionActual) / precioActualSinIva) * 100 : null;
 
   return (
-    <div className="min-h-screen w-full pb-16" style={{ background: C.bg, color: C.text }}>
-      <style>{`
-        .paper-grid { background-image: linear-gradient(${C.border}22 1px, transparent 1px), linear-gradient(90deg, ${C.border}22 1px, transparent 1px); background-size: 28px 28px; }
-        input[type=number]::-webkit-inner-spin-button { opacity: 0.5; }
-      `}</style>
-
-      <div className="paper-grid">
-        <header className="border-b px-6 py-6 md:px-10" style={{ borderColor: C.border }}>
-          <div className="max-w-6xl mx-auto flex items-center justify-between flex-wrap gap-3">
-            <div>
-              <div className="flex items-center gap-2 text-[11px] tracking-[0.3em] uppercase font-['JetBrains_Mono'] mb-1" style={{ color: C.tierra }}>
-                <Ruler size={13} /> Elisabeth Tchana · Consultoría de negocio
-              </div>
-              <h1 className="text-2xl md:text-3xl font-['Space_Grotesk'] font-semibold">Plano de Escandallo</h1>
-              <p className="text-sm mt-1" style={{ color: C.muted }}>Diagnóstico qué está frenando tu negocio, defino contigo una estrategia y te ayudo a ponerla en marcha.</p>
-            </div>
-            <div className="relative border px-3 py-1.5 rotate-[-3deg] text-[10px] tracking-[0.15em] uppercase font-['JetBrains_Mono']" style={{ borderColor: C.tierra, color: C.tierra }}>Escala 1:1</div>
-          </div>
-        </header>
-
-        <main className="max-w-6xl mx-auto px-6 md:px-10 py-8">
-          <div className="grid grid-cols-2 gap-3 mb-6 max-w-md">
-            <button onClick={() => setModo("producto")} className="flex items-center justify-center gap-2 py-3 border text-sm font-semibold uppercase tracking-wide transition-colors" style={toggleBtn(modo === "producto")}>
-              <Package size={16} /> Producto
-            </button>
-            <button onClick={() => setModo("servicio")} className="flex items-center justify-center gap-2 py-3 border text-sm font-semibold uppercase tracking-wide transition-colors" style={toggleBtn(modo === "servicio")}>
-              <Briefcase size={16} /> Servicio
-            </button>
-          </div>
-
-          <div className="grid lg:grid-cols-2 gap-6 items-start">
-            <div className="space-y-6">
-              <Panel title="Identificación" tag="01">
-                <div className="p-4 space-y-3">
-                  <label className="block">
-                    <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>{modo === "producto" ? "Nombre del producto" : "Nombre del servicio"}</span>
-                    <input value={nombre} onChange={(e) => setNombre(e.target.value)}
-                      className="w-full border px-3 py-2 text-sm outline-none" style={{ background: C.bg, borderColor: C.border, color: C.text }} />
-                  </label>
-                  <label className="block">
-                    <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Sector</span>
-                    {modo === "producto"
-                      ? <SectorSelect value={sector} onChange={setSector} options={SECTORES_PRODUCTO} />
-                      : <SectorSelect value={sectorServicio} onChange={setSectorServicio} options={SECTORES_SERVICIO} />}
-                  </label>
-                  {modo === "servicio" && (
-                    <div>
-                      <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>¿A quién facturas normalmente este servicio?</span>
-                      <div className="flex gap-2">
-                        <button onClick={() => setTipoCliente("empresa")} className="flex-1 py-1.5 text-xs uppercase tracking-wide border" style={tipoCliente === "empresa" ? { borderColor: C.tierra, color: C.tierra, background: C.tierraSoft } : { borderColor: C.border, color: C.muted }}>Empresas / autónomos</button>
-                        <button onClick={() => setTipoCliente("particular")} className="flex-1 py-1.5 text-xs uppercase tracking-wide border" style={tipoCliente === "particular" ? { borderColor: C.tierra, color: C.tierra, background: C.tierraSoft } : { borderColor: C.border, color: C.muted }}>Particulares</button>
-                      </div>
-                      {tipoCliente === "empresa" && (
-                        <label className="flex items-center gap-2 mt-2 text-[11px]" style={{ color: C.muted }}>
-                          <input type="checkbox" checked={nuevoAutonomo} onChange={(e) => setNuevoAutonomo(e.target.checked)} />
-                          Soy nuevo autónomo (retención reducida 7% los 2 primeros años)
-                        </label>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </Panel>
-
-              {modo === "producto" ? (
-                <>
-                  <Panel title="Materiales" tag="02" hint="El % de merma sube el coste real. ¿Compras en bloque? Usa la calculadora de cada fila.">
-                    <div className="p-4 pt-2"><ItemList items={materiales} setItems={setMateriales} placeholder="Añade cada material: tela, harina, cera, hilo…" showCalc calcType="compra" /></div>
-                  </Panel>
-                  <Panel title="Packaging" tag="03">
-                    <div className="p-4"><ItemList items={packaging} setItems={setPackaging} placeholder="Caja, bolsa, etiqueta, adorno, papel de relleno…" showCalc calcType="compra" /></div>
-                  </Panel>
-                  <Panel title="Mano de obra" tag="04" hint="¿Trabajas por lotes? Tiempo total del lote ÷ unidades que salen = horas por unidad.">
-                    <div className="p-4 pt-2"><ItemList items={manoObra} setItems={setManoObra} placeholder="Tareas por horas: elaboración, montaje, envasado…" showCalc calcType="lote" /></div>
-                  </Panel>
-                  <Panel title="Otros costes directos" tag="05">
-                    <div className="p-4"><ItemList items={otros} setItems={setOtros} placeholder="Cualquier otro coste directo del producto." /></div>
-                  </Panel>
-                  <Panel title="Costes indirectos (prorrateados)" tag="06" hint="Alquiler, luz, seguros… se reparten entre las unidades que estimas vender al mes.">
-                    <div className="p-4 pt-2 space-y-3">
-                      <IndirectList items={indirectos} setItems={setIndirectos} />
-                      <label className="block">
-                        <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Unidades estimadas al mes</span>
-                        <input type="number" step="1" value={unidadesMes} onChange={(e) => setUnidadesMes(parseFloat(e.target.value) || 0)}
-                          className="w-full border px-3 py-2 text-sm font-['JetBrains_Mono'] outline-none" style={{ background: C.bg, borderColor: C.border, color: C.text }} />
-                      </label>
-                      <div className="flex justify-between items-center border-t pt-2" style={{ borderColor: C.border }}>
-                        <span className="text-[11px] uppercase tracking-wide" style={{ color: C.muted }}>Coste indirecto / unidad</span>
-                        <span className="font-['JetBrains_Mono'] text-sm font-semibold">{fmt(costeIndirectoUnitario)} €</span>
-                      </div>
-                    </div>
-                  </Panel>
-                </>
-              ) : (
-                <>
-                  <Panel title="Horas del servicio" tag="02" hint="Cuenta todo el tiempo real: preparar, ejecutar y hacer seguimiento después.">
-                    <div className="p-4 pt-2 grid grid-cols-3 gap-2">
-                      <label className="block">
-                        <span className="block text-[10px] uppercase mb-1" style={{ color: C.muted }}>Preparación (h)</span>
-                        <input type="number" step="0.25" value={horasPrep} onChange={(e) => setHorasPrep(parseFloat(e.target.value) || 0)}
-                          className="w-full border px-2 py-2 text-sm font-['JetBrains_Mono'] outline-none" style={{ background: C.bg, borderColor: C.border, color: C.text }} />
-                      </label>
-                      <label className="block">
-                        <span className="block text-[10px] uppercase mb-1" style={{ color: C.muted }}>Ejecución (h)</span>
-                        <input type="number" step="0.25" value={horasEjec} onChange={(e) => setHorasEjec(parseFloat(e.target.value) || 0)}
-                          className="w-full border px-2 py-2 text-sm font-['JetBrains_Mono'] outline-none" style={{ background: C.bg, borderColor: C.border, color: C.text }} />
-                      </label>
-                      <label className="block">
-                        <span className="block text-[10px] uppercase mb-1" style={{ color: C.muted }}>Seguimiento (h)</span>
-                        <input type="number" step="0.25" value={horasSeguimiento} onChange={(e) => setHorasSeguimiento(parseFloat(e.target.value) || 0)}
-                          className="w-full border px-2 py-2 text-sm font-['JetBrains_Mono'] outline-none" style={{ background: C.bg, borderColor: C.border, color: C.text }} />
-                      </label>
-                    </div>
-                    <div className="px-4 pb-4 pt-1 flex justify-between items-center border-t mt-2" style={{ borderColor: C.border }}>
-                      <span className="text-[11px] uppercase tracking-wide" style={{ color: C.muted }}>Horas totales</span>
-                      <span className="font-['JetBrains_Mono'] text-sm font-semibold">{fmt(horasTotalesServicio)} h</span>
-                    </div>
-                    <div className="px-4 pb-4">
-                      <label className="block">
-                        <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Coste de tu hora (déjalo en 0 si el margen ES tu sueldo; ponlo si subcontratas)</span>
-                        <div className="flex items-center border" style={{ background: C.bg, borderColor: C.border }}>
-                          <input type="number" step="0.5" value={tarifaHoraCoste} onChange={(e) => setTarifaHoraCoste(parseFloat(e.target.value) || 0)}
-                            className="w-full bg-transparent px-3 py-2 text-sm font-['JetBrains_Mono'] outline-none" style={{ color: C.text }} />
-                          <span className="pr-3 text-xs" style={{ color: C.oliva }}>€/h</span>
-                        </div>
-                      </label>
-                    </div>
-                  </Panel>
-
-                  <Panel title="Capacidad e indirectos" tag="03" hint="Software, herramientas, seguros… se reparten entre las horas facturables que estimas tener al mes.">
-                    <div className="p-4 pt-2 space-y-3">
-                      <IndirectList items={indirectosServicio} setItems={setIndirectosServicio} />
-                      <label className="block">
-                        <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Horas facturables al mes</span>
-                        <input type="number" step="1" value={capacidadFacturableMes} onChange={(e) => setCapacidadFacturableMes(parseFloat(e.target.value) || 0)}
-                          className="w-full border px-3 py-2 text-sm font-['JetBrains_Mono'] outline-none" style={{ background: C.bg, borderColor: C.border, color: C.text }} />
-                      </label>
-                      <div className="flex justify-between items-center border-t pt-2" style={{ borderColor: C.border }}>
-                        <span className="text-[11px] uppercase tracking-wide" style={{ color: C.muted }}>Coste indirecto / hora</span>
-                        <span className="font-['JetBrains_Mono'] text-sm font-semibold">{fmt(costeIndirectoPorHora)} €</span>
-                      </div>
-                    </div>
-                  </Panel>
-
-                  <Panel title="Otros costes directos" tag="04" hint="Desplazamientos, materiales puntuales que uses solo en este servicio…">
-                    <div className="p-4"><ItemList items={otrosServicio} setItems={setOtrosServicio} placeholder="ej. Kilometraje, dietas, un material concreto…" showMerma={false} /></div>
-                  </Panel>
-                </>
-              )}
-
-              <Panel title="Margen comercial" tag={modo === "producto" ? "07" : "05"}>
-                <div className="p-4 space-y-4">
-                  <div className="flex justify-between items-center border-b pb-3" style={{ borderColor: C.border }}>
-                    <span className="text-[11px] uppercase tracking-wide" style={{ color: C.muted }}>Coste total {modo === "producto" ? "unitario" : "del servicio"}</span>
-                    <span className="font-['JetBrains_Mono'] text-lg font-semibold">{fmt(costeTotal)} €</span>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => setModoMargen("coste")} className="flex-1 py-1.5 text-xs uppercase tracking-wide border" style={modoMargen === "coste" ? { borderColor: C.tierra, color: C.tierra, background: C.tierraSoft } : { borderColor: C.border, color: C.muted }}>% sobre coste</button>
-                    <button onClick={() => setModoMargen("pvp")} className="flex-1 py-1.5 text-xs uppercase tracking-wide border" style={modoMargen === "pvp" ? { borderColor: C.tierra, color: C.tierra, background: C.tierraSoft } : { borderColor: C.border, color: C.muted }}>% sobre PVP</button>
-                  </div>
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-[11px] uppercase tracking-wide" style={{ color: C.muted }}>Margen</span>
-                      <span className="font-['JetBrains_Mono'] text-sm font-semibold" style={{ color: C.tierra }}>{margen}%</span>
-                    </div>
-                    <input type="range" min="0" max={modoMargen === "pvp" ? 90 : 300} value={margen} onChange={(e) => setMargen(parseFloat(e.target.value))} className="w-full" style={{ accentColor: C.tierra }} />
-                  </div>
-                  <button onClick={pedirSugerenciaIA} disabled={aiLoading} className="w-full flex items-center justify-center gap-2 border py-2 text-xs uppercase tracking-wide disabled:opacity-50" style={{ borderColor: C.oliva, color: C.oliva }}>
-                    {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-                    {aiLoading ? "Calculando…" : "Sugerencia de margen con IA"}
-                  </button>
-                  {aiError && <p className="text-xs" style={{ color: C.alerta }}>{aiError}</p>}
-                  {aiSugerencia && (
-                    <div className="border p-3 text-xs space-y-1" style={{ borderColor: C.oliva, background: C.olivaSoft }}>
-                      <p className="font-['JetBrains_Mono']" style={{ color: C.oliva }}>Rango sugerido: {aiSugerencia.marginMin}%–{aiSugerencia.marginMax}% (recomendado {aiSugerencia.marginRecomendado}%)</p>
-                      <p>{aiSugerencia.razonamiento}</p>
-                    </div>
-                  )}
-                </div>
-              </Panel>
-
-              <Panel title="Marketing y canales de venta" tag={modo === "producto" ? "08" : "06"}>
-                <div className="p-4 space-y-4">
-                  <div>
-                    <div className="flex justify-between mb-1">
-                      <span className="text-[11px] uppercase tracking-wide" style={{ color: C.muted }}>% destinado a ads / marketing</span>
-                      <span className="font-['JetBrains_Mono'] text-sm font-semibold" style={{ color: C.tierra }}>{marketingPct}%</span>
-                    </div>
-                    <input type="range" min="0" max="30" value={marketingPct} onChange={(e) => setMarketingPct(parseFloat(e.target.value))} className="w-full" style={{ accentColor: C.tierra }} />
-                  </div>
-                  <div>
-                    <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>Canales de venta y su comisión</span>
-                    <CanalList canales={canales} setCanales={setCanales} pvpSinIva={pvpSinIva} beneficioBruto={beneficioBruto} marketingImporte={marketingImporte} irpfEfectivo={irpfEfectivo} />
-                  </div>
-                </div>
-              </Panel>
-
-              <Panel title="Impuestos" tag={modo === "producto" ? "09" : "07"}>
-                <div className="p-4 space-y-3">
-                  <label className="block">
-                    <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>IVA aplicable</span>
-                    <select value={iva} onChange={(e) => setIva(parseFloat(e.target.value))} className="w-full border px-3 py-2 text-sm outline-none" style={{ background: C.bg, borderColor: C.border, color: C.text }}>
-                      {IVA_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
-                    </select>
-                  </label>
-                  {esRetencionReal ? (
-                    <div className="border p-3" style={{ borderColor: C.tierra, background: C.tierraSoft }}>
-                      <p className="text-xs font-semibold" style={{ color: C.tierra }}>Retención IRPF real en la factura: {irpfEfectivo}%</p>
-                      <p className="text-[11px] mt-1 leading-relaxed" style={{ color: C.text }}>
-                        Facturas a empresas/autónomos, así que Hacienda te retiene este {irpfEfectivo}% directamente en cada factura — ese dinero no llega a tu cuenta, ya está pagado.
-                      </p>
-                    </div>
-                  ) : (
-                    <div>
-                      <button onClick={() => setIrpfOpen(!irpfOpen)} className="flex items-center gap-1 text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>
-                        Provisión IRPF (estimada) <ChevronDown size={12} className={`transition-transform ${irpfOpen ? "rotate-180" : ""}`} />
-                      </button>
-                      {irpfOpen && (
-                        <p className="text-[11px] mb-2 leading-relaxed" style={{ color: C.muted }}>
-                          {modo === "servicio"
-                            ? "Facturas a particulares, así que no hay retención en factura. El IRPF se paga trimestralmente (pago fraccionado). Este % es una reserva orientativa."
-                            : "Como autónomo en estimación directa, el IRPF no se retiene venta a venta: se paga trimestralmente (pago fraccionado, normalmente 20% del beneficio). Este % es una reserva orientativa, no una cifra exacta."}
-                        </p>
-                      )}
-                      <div className="flex items-center border" style={{ background: C.bg, borderColor: C.border }}>
-                        <input type="number" step="1" value={irpf} onChange={(e) => setIrpf(parseFloat(e.target.value) || 0)}
-                          className="w-full bg-transparent px-3 py-2 text-sm font-['JetBrains_Mono'] outline-none" style={{ color: C.text }} />
-                        <span className="pr-3 text-xs" style={{ color: C.oliva }}>%</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </Panel>
-            </div>
-
-            <div className="space-y-6 lg:sticky lg:top-6">
-              <Panel title="Compara con tu precio actual" tag="10" hint="Si ya lo vendes, pon a qué precio (con IVA) y te decimos si te compensa de verdad.">
-                <div className="p-4 pt-2 space-y-3">
-                  <label className="block">
-                    <span className="block text-[11px] uppercase tracking-wide mb-1" style={{ color: C.muted }}>¿A qué precio lo vendes ahora? (con IVA)</span>
-                    <div className="flex items-center border" style={{ background: C.bg, borderColor: C.border }}>
-                      <input type="number" step="0.01" value={precioActualConIva} onChange={(e) => setPrecioActualConIva(e.target.value)}
-                        placeholder="ej. 6,50" className="w-full bg-transparent px-3 py-2 font-['JetBrains_Mono'] text-sm outline-none" style={{ color: C.text }} />
-                      <span className="pr-3 text-xs" style={{ color: C.oliva }}>€</span>
-                    </div>
-                  </label>
-                  {tieneComparador && (
-                    <div className="border p-3 flex items-start gap-2.5" style={
-                      estimacionActual < 0 ? { borderColor: C.alerta, background: C.alertaSoft }
-                      : diffEstimacion > 0.01 ? { borderColor: C.tierra, background: C.tierraSoft }
-                      : { borderColor: C.oliva, background: C.olivaSoft }
-                    }>
-                      {estimacionActual < 0 ? <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: C.alerta }} />
-                        : diffEstimacion > 0.01 ? <AlertTriangle size={16} className="shrink-0 mt-0.5" style={{ color: C.tierra }} />
-                        : <CheckCircle2 size={16} className="shrink-0 mt-0.5" style={{ color: C.oliva }} />}
-                      <div className="text-xs leading-relaxed">
-                        {estimacionActual < 0 ? (
-                          <p className="font-semibold" style={{ color: C.alerta }}>Estás perdiendo {fmt(Math.abs(estimacionActual))} € cada vez, a este precio.</p>
-                        ) : diffEstimacion > 0.01 ? (
-                          <p style={{ color: C.tierra }}>Con tu precio actual te quedan <strong>{fmt(estimacionActual)} €</strong>. Con el margen fijado a la izquierda, podrías quedarte con <strong>{fmt(estimacionFinal)} €</strong> — {fmt(diffEstimacion)} € más.</p>
-                        ) : (
-                          <p style={{ color: C.oliva }}>Tu precio actual ya te deja <strong>{fmt(estimacionActual)} €</strong> — cubre bien (o mejor) el margen que has fijado.</p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </Panel>
-
-              <Panel title="Alzado del precio" tag="11" className="pb-6">
-                <div className="p-5">
-                  {warnings.length > 0 && (
-                    <div className="border p-2.5 mb-4 space-y-1" style={{ borderColor: C.alerta, background: C.alertaSoft }}>
-                      {warnings.map((w) => (
-                        <div key={w} className="flex items-start gap-1.5 text-[10.5px]" style={{ color: C.alerta }}>
-                          <TriangleAlert size={12} className="shrink-0 mt-0.5" /><span>{w}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <div className="text-[10px] uppercase tracking-wider mb-2 flex items-center gap-1" style={{ color: C.muted }}><Info size={11} /> Reparto del coste total</div>
-                  <div className="space-y-1 text-xs font-['JetBrains_Mono'] mb-3">
-                    {breakdown.map((b) => (
-                      <div key={b.label} className="flex justify-between">
-                        <span>{b.label}</span>
-                        <span>{fmt(b.value)} € {costeTotal > 0 && <span style={{ color: C.muted }}>({fmt((b.value / costeTotal) * 100)}%)</span>}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex flex-col items-stretch">
-                    <div className="border p-3 flex justify-between items-center" style={{ background: C.bg, borderColor: C.border }}>
-                      <span className="text-[11px] uppercase tracking-wide" style={{ color: C.muted }}>Coste total</span>
-                      <span className="font-['JetBrains_Mono'] text-sm">{fmt(costeTotal)} €</span>
-                    </div>
-                    <DimLine label="+ margen" value={`${fmt(beneficioBruto)} € (${fmt(margenReal)}%)`} accent={C.tierra} />
-                    <div className="border p-3 flex justify-between items-center" style={{ borderColor: C.tierra, background: C.tierraSoft }}>
-                      <span className="text-[11px] uppercase tracking-wide" style={{ color: C.tierra }}>Precio sin IVA</span>
-                      <span className="font-['JetBrains_Mono'] text-sm font-semibold" style={{ color: C.tierra }}>{fmt(pvpSinIva)} €</span>
-                    </div>
-                    <DimLine label={`+ iva ${iva}%`} value={`${fmt(ivaImporte)} €`} />
-                    <div className="border-2 p-3 flex justify-between items-center" style={{ borderColor: C.oliva, background: C.olivaSoft }}>
-                      <span className="text-xs uppercase tracking-wide font-semibold" style={{ color: C.oliva }}>Precio final cliente</span>
-                      <span className="font-['JetBrains_Mono'] text-xl font-bold" style={{ color: C.oliva }}>{fmt(pvpFinal)} €</span>
-                    </div>
-                  </div>
-                  <div className="mt-6 pt-4 border-t border-dashed space-y-1.5" style={{ borderColor: C.border }}>
-                    <div className="flex justify-between items-center text-sm"><span>Beneficio bruto</span><span className="font-['JetBrains_Mono']">{fmt(beneficioBruto)} €</span></div>
-                    <div className="flex justify-between items-center text-sm"><span>− Marketing / ads ({marketingPct}%)</span><span className="font-['JetBrains_Mono']" style={{ color: C.alerta }}>−{fmt(marketingImporte)} €</span></div>
-                    <div className="flex justify-between items-center text-sm"><span>− Comisión ({canalPrincipal.nombre || "canal principal"})</span><span className="font-['JetBrains_Mono']" style={{ color: C.alerta }}>−{fmt(comisionImporte)} €</span></div>
-                    <div className="flex justify-between items-center text-sm font-medium pt-1 border-t" style={{ borderColor: C.border }}>
-                      <span>= Margen tras costes comerciales</span><span className="font-['JetBrains_Mono']">{fmt(margenTrasComerciales)} €</span>
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span>− {esRetencionReal ? `Retención IRPF real (${irpfEfectivo}%)` : `Provisión fiscal estimada, IRPF (${irpfEfectivo}%)`}</span>
-                      <span className="font-['JetBrains_Mono']" style={{ color: C.alerta }}>−{fmt(provisionIrpf)} €</span>
-                    </div>
-                    <div className="border p-3 flex justify-between items-center mt-2" style={{ borderColor: C.oliva, background: C.olivaSoft }}>
-                      <span className="text-xs uppercase tracking-wide font-semibold flex items-center gap-1.5" style={{ color: C.oliva }}><Stamp size={14} /> Estimación de lo que te queda</span>
-                      <span className="font-['JetBrains_Mono'] text-xl font-bold" style={{ color: C.oliva }}>{fmt(estimacionFinal)} €</span>
-                    </div>
-                    <p className="text-[10px] pt-1" style={{ color: C.muted }}>
-                      {esRetencionReal ? "La retención ya está descontada en la factura real; el resto sigue siendo una estimación." : "Es una estimación: incluye una previsión de IRPF, no una cifra exacta de Hacienda."}
-                    </p>
-                  </div>
-                  <button onClick={guardar} className="mt-5 w-full flex items-center justify-center gap-2 py-2.5 text-xs uppercase tracking-wide font-semibold" style={{ background: C.tierra, color: "#fff" }}>
-                    <Save size={14} /> {saveMsg || "Guardar este escandallo"}
-                  </button>
-                </div>
-              </Panel>
-
-              <Panel title="Archivo de planos guardados" tag="12">
-                <div className="p-4">
-                  {guardados.length === 0 ? (
-                    <p className="text-xs" style={{ color: C.muted }}>Aún no has guardado ningún escandallo.</p>
-                  ) : (
-                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                      {guardados.map((g) => (
-                        <div key={g.id} className="flex items-center justify-between border px-3 py-2 text-xs" style={{ borderColor: C.border }}>
-                          <div>
-                            <p className="font-medium flex items-center gap-1.5">
-                              {g.modo === "servicio" ? <Briefcase size={11} /> : <Package size={11} />} {g.nombre}
-                            </p>
-                            <p className="font-['JetBrains_Mono']" style={{ color: C.muted }}>Precio {fmt(g.pvpFinal)} € · Estimación {fmt(g.estimacionFinal)} €</p>
-                          </div>
-                          <button onClick={() => borrar(g.id)} className="p-1" style={{ color: C.alerta }}><Trash2 size={14} /></button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </Panel>
-            </div>
-          </div>
-        </main>
+    <div className="pricing-workspace">
+      <div className="pricing-wizard" aria-live="polite">
+        <div className="wizard-top"><span>ELISABETH TCHANA <span className="top-divider">/</span> PRECIO RENTABLE</span><span>GRATIS · LANZAMIENTO</span></div>
+        <div className="wizard-card">
+          {wizardStep > 0 && wizardStep < 7 && <div className="wizard-progress"><div className="wizard-step">Paso {activeNumber} de {totalSteps}</div><div className="wizard-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={progress}><span style={{width:`${progress}%`}}/></div></div>}
+          {wizardStep === 0 && <>
+            <p className="wizard-kicker">COMENCEMOS</p><h2>Vamos a poner números a tu precio.</h2>
+            <p className="wizard-lead">Te haré unas preguntas sobre tu producto o servicio. Al final verás qué te cuesta, qué margen te deja y a partir de qué precio puedes vender sin perder dinero.</p>
+            <div className="wizard-chips"><span>Producto o servicio</span><span>Un precio cada vez</span><span>Resultado claro</span></div>
+            <div className="wizard-actions end"><button type="button" className="wizard-primary" onClick={nextStep}>Empezar gratis <span aria-hidden="true">→</span></button></div>
+          </>}
+          {wizardStep === 1 && <>
+            <p className="wizard-kicker">01 · TU NEGOCIO</p><h2>¿Qué vas a poner a prueba?</h2>
+            <p className="wizard-lead">Elige una opción y ponle nombre. Calcularemos el precio de un producto o servicio concreto.</p>
+            <div className="wizard-choices"><button type="button" className={`wizard-choice ${modo==='producto'?'chosen':''}`} onClick={()=>{setModo('producto');setNombre('')}} aria-pressed={modo==='producto'}><span>Producto</span><small>Algo que fabricas, compras o distribuyes.</small></button><button type="button" className={`wizard-choice ${modo==='servicio'?'chosen':''}`} onClick={()=>{setModo('servicio');setNombre('')}} aria-pressed={modo==='servicio'}><span>Servicio</span><small>Un trabajo o proyecto que realizas para un cliente.</small></button></div>
+            <div className="wizard-fields"><label><span>Nombre {modo==='producto'?'del producto':'del servicio'}</span><input value={nombre} maxLength="150" placeholder={modo==='producto'?'Ej. Vela aromática':'Ej. Sesión de asesoría'} onChange={e=>setNombre(e.target.value)} /></label><label><span>Sector o actividad</span><SectorSelect value={modo==='producto'?sector:sectorServicio} onChange={modo==='producto'?setSector:setSectorServicio} options={modo==='producto'?SECTORES_PRODUCTO:SECTORES_SERVICIO}/></label></div>
+            <WizardActions back={previousStep} next={nextStep} error={formError}/>
+          </>}
+          {wizardStep === 2 && modo === 'producto' && <>
+            <p className="wizard-kicker">02 · COSTES DIRECTOS</p><h2>¿Qué lleva cada unidad?</h2><p className="wizard-lead">Añade materiales y envase con su cantidad y precio por unidad. Si hay desperdicio, incluye la merma.</p>
+            <CostRows title="Materiales" items={materiales} setItems={setMateriales} hint="Ingredientes, piezas o materia prima" showWaste/>
+            <CostRows title="Envase y presentación" items={packaging} setItems={setPackaging} hint="Caja, etiqueta, bolsa…" showWaste/>
+            <WizardActions back={previousStep} next={nextStep} error={formError}/>
+          </>}
+          {wizardStep === 2 && modo === 'servicio' && <>
+            <p className="wizard-kicker">02 · TU TIEMPO</p><h2>¿Cuánto tiempo te lleva?</h2><p className="wizard-lead">Cuenta también la preparación y el seguimiento. Pon aquí el coste de tu hora de trabajo, no el precio que cobras al cliente.</p>
+            <div className="wizard-fields cols"><NumberField label="Preparación" value={horasPrep} onChange={setHorasPrep} unit="horas"/><NumberField label="Ejecución" value={horasEjec} onChange={setHorasEjec} unit="horas"/><NumberField label="Seguimiento" value={horasSeguimiento} onChange={setHorasSeguimiento} unit="horas"/><NumberField label="Coste de tu hora" value={tarifaHoraCoste} onChange={setTarifaHoraCoste} unit="€ / hora"/></div>
+            <p className="wizard-note">Puedes estimar ese coste dividiendo lo que necesitas para remunerar tu trabajo y cotizar entre tus horas realmente facturables.</p>
+            <WizardActions back={previousStep} next={nextStep} error={formError}/>
+          </>}
+          {wizardStep === 3 && <>
+            <p className="wizard-kicker">03 · TU TRABAJO</p><h2>¿Qué más cuesta sacar cada unidad?</h2><p className="wizard-lead">Tu tiempo y cualquier otro gasto directo que aparece solo cuando vendes este producto.</p>
+            <CostRows title="Mano de obra" items={manoObra} setItems={setManoObra} hint="Ej. elaboración: 0,5 horas a 15 €/hora" showWaste={false}/>
+            <CostRows title="Otros costes directos" items={otros} setItems={setOtros} hint="Ej. comisión fija, desplazamiento o material adicional" showWaste={false}/>
+            <WizardActions back={previousStep} next={nextStep} error={formError}/>
+          </>}
+          {wizardStep === 4 && <>
+            <p className="wizard-kicker">{modo==='producto'?'04':'03'} · COSTES DEL NEGOCIO</p><h2>¿Y los gastos que pagas aunque no vendas?</h2><p className="wizard-lead">{modo==='producto'?'Repartimos alquiler, software, suministros y otros gastos entre las unidades que esperas vender cada mes.':'Repartimos alquiler, software, suministros y otros gastos entre las horas que puedes facturar cada mes.'}</p>
+            <FixedRows items={modo==='producto'?indirectos:indirectosServicio} setItems={modo==='producto'?setIndirectos:setIndirectosServicio}/>
+            {modo==='servicio' && <CostRows title="Otros costes de este servicio" items={otrosServicio} setItems={setOtrosServicio} hint="Desplazamientos, materiales o colaboradores puntuales" showWaste={false}/ >}
+            <div className="wizard-fields"><NumberField label={modo==='producto'?'Unidades que esperas vender al mes':'Horas que puedes facturar al mes'} value={modo==='producto'?unidadesMes:capacidadFacturableMes} onChange={modo==='producto'?setUnidadesMes:setCapacidadFacturableMes} unit={modo==='producto'?'unidades':'horas'} /></div>
+            <p className="wizard-note">Si no conoces esta cifra, haz una estimación realista. Cambiará cuánto coste fijo corresponde a cada venta.</p>
+            <WizardActions back={previousStep} next={nextStep} error={formError}/>
+          </>}
+          {wizardStep === 5 && <>
+            <p className="wizard-kicker">{modo==='producto'?'05':'04'} · TU PRECIO</p><h2>¿A cuánto vendes ahora?</h2><p className="wizard-lead">Nos ayudará a comparar. Si todavía no vendes este {modo}, deja el campo vacío.</p>
+            <div className="wizard-fields cols"><label><span>Precio actual con IVA</span><div className="wizard-input-unit"><input type="number" min="0" step="0.01" inputMode="decimal" value={precioActualConIva} placeholder="Opcional" onChange={e=>setPrecioActualConIva(e.target.value)}/><b>€</b></div></label><label><span>IVA aplicable</span><select value={iva} onChange={e=>setIva(Number(e.target.value))}>{IVA_OPTIONS.map(o=><option key={o.v} value={o.v}>{o.label}</option>)}</select></label></div>
+            <div className="wizard-divider"/>
+            <h3>¿Qué margen quieres añadir?</h3><p className="wizard-note">Elige cómo expresarlo. Un 40 % sobre coste y un 40 % sobre el precio de venta dan resultados distintos.</p>
+            <div className="wizard-toggle"><button type="button" className={modoMargen==='coste'?'chosen':''} onClick={()=>setModoMargen('coste')}>% sobre coste</button><button type="button" className={modoMargen==='pvp'?'chosen':''} onClick={()=>{setModoMargen('pvp');setMargen(Math.min(margen,90))}}>% sobre venta</button></div>
+            <div className="wizard-fields cols"><NumberField label="Margen objetivo" value={margen} onChange={setMargen} unit="%" max={modoMargen==='pvp'?90:300}/><NumberField label="Publicidad por venta" value={marketingPct} onChange={setMarketingPct} unit="%" max={90}/></div>
+            <aside className="wizard-sector-note" aria-live="polite"><span className="wizard-sector-note-title">Una referencia para {modo==='producto'?sector:sectorServicio}</span><p>Tu objetivo de <strong>{fmt(margenSobreCoste)} % sobre coste</strong> equivale a <strong>{fmt(margenSobreVenta)} % sobre el precio de venta</strong>, antes de publicidad, comisiones e impuestos.</p><p>No hay una media fiable única para todos los {modo==='producto'?'productos':'servicios'} de este sector. Para comparar negocios completos por actividad y tamaño, consulta las <a href="https://www.bde.es/wbe/es/areas-actuacion/central-balances/bases-de-datos-y-aplicaciones/bbdd-datos-publicas-informacion-sectores/" target="_blank" rel="noopener noreferrer">ratios sectoriales del Banco de España ↗</a>. Esas ratios no fijan el margen adecuado de esta venta.</p></aside>
+            <div className="wizard-fields cols"><label><span>Canal principal</span><input value={canalPrincipal.nombre} placeholder="Ej. Venta directa" onChange={e=>setCanales([{...canalPrincipal,nombre:e.target.value},...canales.slice(1)])}/></label><label><span>Comisión por venta</span><div className="wizard-input-unit"><input type="number" min="0" step="0.01" inputMode="decimal" value={canalPrincipal.valor} onChange={e=>setCanales([{...canalPrincipal,valor:Number(e.target.value)||0},...canales.slice(1)])}/><select aria-label="Tipo de comisión" value={canalPrincipal.tipo} onChange={e=>setCanales([{...canalPrincipal,tipo:e.target.value},...canales.slice(1)])}><option value="porcentaje">%</option><option value="fijo">€</option></select></div></label></div>
+            <details className="wizard-details"><summary>Más ajustes fiscales</summary><p className="wizard-note">El IVA sirve para comparar precios con impuestos. La provisión de IRPF es solo orientativa.</p>{modo==='servicio'&&<div className="wizard-toggle"><button type="button" className={tipoCliente==='empresa'?'chosen':''} onClick={()=>setTipoCliente('empresa')}>Facturo a empresas</button><button type="button" className={tipoCliente==='particular'?'chosen':''} onClick={()=>setTipoCliente('particular')}>Facturo a particulares</button></div>}{modo==='servicio'&&tipoCliente==='empresa'?<label className="wizard-check"><input type="checkbox" checked={nuevoAutonomo} onChange={e=>setNuevoAutonomo(e.target.checked)}/> Retención reducida de nuevo autónomo</label>:<NumberField label="Provisión IRPF estimada" value={irpf} onChange={setIrpf} unit="%" max={90}/>}</details>
+            <WizardActions back={previousStep} next={nextStep} error={formError}/>
+          </>}
+          {wizardStep === 6 && <>
+            <p className="wizard-kicker">TU RESULTADO ESTÁ LISTO</p><h2>Ahora sí: veamos tus números.</h2><p className="wizard-lead">Déjame estos datos básicos para mostrarte el resultado completo. No te pediré teléfono ni facturación.</p>
+            <form onSubmit={unlockResult} className="wizard-form">
+              <div className="wizard-fields cols"><label><span>Tu nombre</span><input required autoComplete="name" maxLength="100" value={leadName} placeholder="Nombre" onChange={e=>setLeadName(e.target.value)}/></label><label><span>Tu email</span><input required type="email" autoComplete="email" maxLength="254" value={leadEmail} placeholder="tu@email.com" onChange={e=>setLeadEmail(e.target.value)}/></label></div>
+              <p className="wizard-note">{modo==='producto'?'Producto':'Servicio'}: <strong>{nombre}</strong> · Sector: <strong>{modo==='producto'?sector:sectorServicio}</strong>. Puedes volver para cambiarlos.</p>
+              <label className="wizard-honeypot" aria-hidden="true">Web<input tabIndex={-1} autoComplete="off" value={companyWebsite} onChange={e=>setCompanyWebsite(e.target.value)}/></label>
+              <label className="wizard-check"><input type="checkbox" required checked={privacyAccepted} onChange={e=>setPrivacyAccepted(e.target.checked)}/> <span>He leído la <a href="https://elisabethtchana.com/privacidad" target="_blank" rel="noreferrer">información de privacidad</a> y solicito mi resultado.</span></label>
+              <label className="wizard-check"><input type="checkbox" checked={marketingAccepted} onChange={e=>setMarketingAccepted(e.target.checked)}/> <span>Quiero recibir novedades y consejos comerciales por email. Opcional.</span></label>
+              <div className="wizard-actions"><button type="button" className="wizard-secondary" onClick={previousStep}>Atrás</button><button type="submit" className="wizard-primary" disabled={leadPending}>{leadPending?'Guardando…':'Ver mi resultado gratis →'}</button></div>
+              {leadError && <p className="wizard-error" role="alert">{leadError}</p>}
+            </form>
+          </>}
+          {wizardStep === 7 && unlocked && <>
+            <p className="wizard-kicker">TU PRECIO, CON CRITERIO</p>
+            <div className="wizard-result-hero"><p>Con el margen que has elegido, tu precio sería</p><div className="wizard-money">{fmt(pvpFinal)} €</div><span>con IVA · {fmt(pvpSinIva)} € sin IVA</span></div>
+            <div className="wizard-metrics"><article><span>Coste real {modo==='producto'?'por unidad':'del servicio'}</span><strong>{fmt(costeTotal)} €</strong></article><article><span>Precio actual</span><strong>{tieneComparador?`${fmt(precioActualNum)} €`:'Sin indicar'}</strong></article><article><span>Margen bruto de este precio</span><strong>{fmt(margenReal)} %</strong></article><article><span>Precio mínimo para cubrir costes comerciales</span><strong>{priceFloor===null?'Revisar gastos':`${fmt(priceFloor)} €`}</strong></article></div>
+            {tieneComparador && <div className={`wizard-alert ${revenueMargin < 0 ? 'bad':'good'}`}><strong>{revenueMargin < 0?'Tu precio actual no cubre todos los costes incluidos.':'Así queda tu precio actual.'}</strong><p>A {fmt(precioActualNum)} € te queda un margen de {fmt(revenueMargin)} % después de costes y gastos comerciales, antes de impuestos personales.</p></div>}
+            {warnings.length>0 && <div className="wizard-alert"><strong>Antes de decidir, revisa esto</strong><ul>{warnings.map(w=><li key={w}>{w}</li>)}</ul></div>}
+            <details className="wizard-details"><summary>Ver de dónde salen los números</summary><div className="wizard-breakdown">{(modo==='producto'?[['Materiales',costeMateriales],['Envase',costePackaging],['Mano de obra',costeManoObra],['Otros directos',costeOtros],['Indirectos',costeIndirectoUnitario]]:[['Tu tiempo',costeManoObraServicio],['Indirectos',costeIndirectoServicio],['Otros directos',costeOtrosServicio]]).map(([label,n])=><div key={label}><span>{label}</span><strong>{fmt(n)} €</strong></div>)}<div><span>Publicidad y comisión al precio calculado</span><strong>{fmt(marketingImporte+comisionImporte)} €</strong></div></div></details>
+            <p className="wizard-note">El precio mínimo cubre costes, publicidad y comisión; no incluye beneficio. El precio recomendado se calcula con el margen que has elegido: comprueba también qué acepta tu mercado. Estas cifras dependen de tus datos y no sustituyen asesoramiento fiscal.</p>
+            <div className="wizard-actions"><button type="button" className="wizard-secondary" onClick={()=>setWizardStep(5)}>Ajustar mis datos</button><button type="button" className="wizard-secondary" onClick={guardar}>{saveMsg||'Guardar en este navegador'}</button></div>
+            <div className="wizard-next"><h3>Ya sabes cuánto deberías cobrar.</h3><p>Ahora, ¿tu negocio está preparado para venderlo a ese precio? Precio, cliente, canales y proceso comercial van de la mano.</p><a className="wizard-primary" href="https://elisabethtchana.com/#contacto">Quiero revisar mi negocio →</a></div>
+          </>}
+        </div>
       </div>
     </div>
   );
 }
+
+function WizardActions({back,next,error}){return <><div className="wizard-actions"><button type="button" className="wizard-secondary" onClick={back}>Atrás</button><button type="button" className="wizard-primary" onClick={next}>Continuar →</button></div>{error&&<p className="wizard-error" role="alert">{error}</p>}</>}
+function NumberField({label,value,onChange,unit,max}){return <label><span>{label}</span><div className="wizard-input-unit"><input type="number" min="0" max={max} step="0.01" inputMode="decimal" value={value} onChange={e=>onChange(Math.max(0,Math.min(max??Infinity,Number(e.target.value)||0)))}/><b>{unit}</b></div></label>}
+function CostRows({title,items,setItems,hint,showWaste}){
+  const update=(id,patch)=>setItems(items.map(it=>it.id===id?{...it,...patch}:it));
+  return <div className="wizard-cost-section"><div className="wizard-section-title"><div><h3>{title}</h3><p>{hint}</p></div><strong>{fmt(sumItems(items))} €</strong></div>{items.map((it,i)=><div className="wizard-cost-row" key={it.id}><div className="row-head"><span>{title} {i+1}</span><button type="button" onClick={()=>setItems(items.filter(x=>x.id!==it.id))} aria-label={`Eliminar ${it.nombre||title}`}>Eliminar</button></div><div className="wizard-fields cols"><label><span>Concepto</span><input value={it.nombre} placeholder="Nombre" onChange={e=>update(it.id,{nombre:e.target.value})}/></label><label><span>Cantidad por venta</span><div className="wizard-input-unit"><input type="number" min="0" step="0.01" inputMode="decimal" value={it.cantidad} onChange={e=>update(it.id,{cantidad:Number(e.target.value)||0})}/><select aria-label="Unidad" value={it.unidad} onChange={e=>update(it.id,{unidad:e.target.value})}>{UNIDADES.map(u=><option key={u}>{u}</option>)}</select></div></label><NumberField label={`Coste por ${it.unidad}`} value={it.precio} onChange={v=>update(it.id,{precio:v})} unit="€"/>{showWaste&&<NumberField label="Merma" value={it.merma} onChange={v=>update(it.id,{merma:v})} unit="%" max={95}/>}</div></div>)}<button type="button" className="wizard-add" onClick={()=>setItems([...items,{id:uid(),nombre:'',cantidad:1,unidad:title==='Mano de obra'?'h':'ud',precio:0,merma:0}])}>+ Añadir {title.toLowerCase()}</button></div>
+}
+function FixedRows({items,setItems}){const update=(id,patch)=>setItems(items.map(it=>it.id===id?{...it,...patch}:it));return <div className="wizard-cost-section"><div className="wizard-section-title"><div><h3>Gastos fijos al mes</h3><p>Añade solo los que correspondan a tu negocio.</p></div></div>{items.map(it=><div className="wizard-fixed-row" key={it.id}><label><span>Concepto</span><input value={it.nombre} placeholder="Ej. alquiler o software" onChange={e=>update(it.id,{nombre:e.target.value})}/></label><NumberField label="Importe al mes" value={it.importe} onChange={v=>update(it.id,{importe:v})} unit="€"/><button type="button" onClick={()=>setItems(items.filter(x=>x.id!==it.id))} aria-label={`Eliminar ${it.nombre||'gasto'}`}>Eliminar</button></div>)}<button type="button" className="wizard-add" onClick={()=>setItems([...items,{id:uid(),nombre:'',importe:0}])}>+ Añadir gasto mensual</button></div>}
